@@ -1,0 +1,106 @@
+//@version=5
+indicator("ZSLA & Chandelier Strategy", overlay = true)
+
+var color longColor = color.green
+var color shortColor = color.red
+var color textColor = color.new(color.white, 0)
+
+//ZSLA
+lsma = ta.linreg(close, 50, 0)
+lsma2 = ta.linreg(lsma, 50, 0)
+eq= lsma-lsma2
+zlsma = lsma+eq
+
+//Chandelier
+atr = 2 * ta.atr(1)
+longStop = (ta.highest(close, 1)) - atr
+longStopPrev = nz(longStop[1], longStop)
+longStop := close[1] > longStopPrev ? math.max(longStop, longStopPrev) : longStop
+
+shortStop = (ta.lowest(close, 1)) + atr
+shortStopPrev = nz(shortStop[1], shortStop)
+shortStop := close[1] < shortStopPrev ? math.min(shortStop, shortStopPrev) : shortStop
+
+var int dir = 1
+dir := close > shortStopPrev ? 1 : close < longStopPrev ? -1 : dir
+
+// Wick calc
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+
+upperWickPercentage = (upperWick / (high - low)) * 100
+lowerWickPercentage = (lowerWick / (high - low)) * 100
+
+// Trend Indicator
+trend_identification_approach  = "Direction of a single EMA"
+ema1_length = 20
+ema2_length = 200
+uptrend_indicator = "🟢"
+downtrend_indicator = "🔴"
+neutraltrend_indicator = "⚫️"
+
+calc_smma(src, len) =>
+    var float smma = na
+    smma := na(smma) ? ta.sma(src, len) : (smma[1] * (len - 1) + src) / len
+    smma
+
+calc_zlema(src, len) =>
+    ema1 = ta.ema(src, len)
+    ema2 = ta.ema(ema1, len)
+    d = ema1 - ema2
+    ema1 + d
+
+check_impulse() =>
+    impulse_length = 34
+    impulse_strength = 9
+
+    hi = calc_smma(high, impulse_length)
+    lo = calc_smma(low, impulse_length)
+    mi = calc_zlema(hlc3, impulse_length)
+
+    md = (mi > hi) ? (mi - hi) : (mi < lo) ? (mi - lo) : 0
+    md_prev = (mi[1] > hi[1]) ? (mi[1] - hi[1]) : (mi[1] < lo[1]) ? (mi[1] - lo[1]) : 0
+
+    sb = ta.sma(md, impulse_strength)
+    sb_prev = ta.sma(md_prev, impulse_strength)
+
+    sh = md - sb
+    sh_prev = md_prev - sb_prev
+
+    is_impulse = sh != 0 and sh_prev != 0
+    is_impulse
+
+get_trend_status() =>
+    impulse = check_impulse()
+    ema1_current_candle = ta.ema(close, ema1_length)
+    ema1_previous_candle = ema1_current_candle[1]
+    if (trend_identification_approach == "Direction of a single EMA")
+        ema1_previous_previous_candle = ema1_current_candle[2]
+        trend_current_candle = not impulse ? neutraltrend_indicator : ema1_current_candle > ema1_previous_candle ? uptrend_indicator : ema1_current_candle < ema1_previous_candle ? downtrend_indicator : neutraltrend_indicator
+        trend_previous_candle = not impulse ? neutraltrend_indicator : ema1_previous_candle > ema1_previous_previous_candle ? uptrend_indicator : ema1_previous_candle < ema1_previous_previous_candle ? downtrend_indicator : neutraltrend_indicator
+        [trend_current_candle, trend_previous_candle]
+
+//* BARS *//
+
+[current_trend_indicator_current_timeframe, previous_trend_indicator_current_timeframe] = get_trend_status()
+barcolor = current_trend_indicator_current_timeframe == uptrend_indicator ? color.green : current_trend_indicator_current_timeframe == downtrend_indicator ? color.red : color.gray
+//barcolor(color = barcolor, display = true ? display.all : display.none)
+
+buySignal1 = dir == 1 and dir[1] == -1
+buySignal2 = close > zlsma
+//buySignal3 = current_trend_indicator_current_timeframe == uptrend_indicator
+buySignal3 = lowerWickPercentage < 5
+buySignal4 = close - open > close[1] - open[1]
+plotshape(buySignal1 and buySignal2 and buySignal3 and buySignal4 ? longStop : na, title='Buy Label', text='Buy', location=location.belowbar, style=shape.labelup, size=size.tiny, color=color.new(longColor, 0), textcolor=textColor)
+
+sellSignal1 = dir == -1 and dir[1] == 1
+sellSignal2 = close < zlsma
+//sellSignal3 = current_trend_indicator_current_timeframe == downtrend_indicator
+sellSignal3 = upperWickPercentage < 5
+sellSignal4 = open - close > open[1] - close[1]
+plotshape(sellSignal1 and sellSignal2 and sellSignal3 and sellSignal4 ? shortStop : na, title='Sell Label', text='Sell', location=location.abovebar, style=shape.labeldown, size=size.tiny, color=color.new(shortColor, 0), textcolor=textColor)
+
+plot(zlsma, color=color.white, linewidth=2)
+
+alertcondition(buySignal1 and buySignal2, "Buy Signal")
+alertcondition(sellSignal1 and sellSignal2, "Sell Signal")
